@@ -3,12 +3,15 @@ name: Build
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
     branches: [master]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,6 +70,19 @@ jobs:
       - name: List built binaries
         run: find dist -type f | sort
 
+      - name: Create release archives
+        run: |
+          mkdir -p release
+          for dir in dist/*/; do
+            target=$(basename "$dir")
+            if [[ "$target" == *windows* ]]; then
+              (cd "$dir" && zip -r "../../release/mongo-tools-${target}.zip" .)
+            else
+              tar -czf "release/mongo-tools-${target}.tar.gz" -C "$dir" .
+            fi
+          done
+          ls -lh release/
+
       - name: Upload linux-amd64
         uses: actions/upload-artifact@v4
         with:
@@ -90,3 +106,13 @@ jobs:
         with:
           name: mongo-tools-windows-amd64
           path: dist/windows-amd64/
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            release/*
