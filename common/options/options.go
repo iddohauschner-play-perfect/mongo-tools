@@ -157,6 +157,11 @@ type Connection struct {
 	TCPKeepAliveSeconds    int    `long:"TCPKeepAliveSeconds" default:"30" hidden:"true" description:"seconds between TCP keep alives"`
 	ServerSelectionTimeout int    `long:"serverSelectionTimeout" hidden:"true" description:"seconds to wait for server selection; 0 means driver default"`
 	Compressors            string `long:"compressors" default:"none" hidden:"true" value-name:"<snappy,...>" description:"comma-separated list of compressors to enable. Use 'none' to disable."`
+
+	ProxyHost     string `long:"proxyHost" value-name:"<hostname>" hidden:"true" description:"SOCKS5 proxy host for connections"`
+	ProxyPort     string `long:"proxyPort" value-name:"<port>" hidden:"true" description:"SOCKS5 proxy port for connections (default: 1080)"`
+	ProxyUsername string `long:"proxyUsername" value-name:"<username>" hidden:"true" description:"username for SOCKS5 proxy authentication"`
+	ProxyPassword string `long:"proxyPassword" value-name:"<password>" hidden:"true" description:"password for SOCKS5 proxy authentication"`
 }
 
 // Struct holding ssl-related options.
@@ -932,6 +937,49 @@ func (opts *ToolOptions) setOptionsFromURI(cs *connstring.ConnString) error {
 			}
 		} else {
 			cs.Compressors = strings.Split(opts.Compressors, ",")
+		}
+
+		// Handle SOCKS5 proxy options from URI.
+		// The driver does not natively parse these, so they end up in UnknownOptions.
+		if proxyHosts, ok := cs.UnknownOptions["proxyhost"]; ok && len(proxyHosts) > 0 {
+			uriProxyHost := proxyHosts[0]
+			if opts.ProxyHost != "" && opts.ProxyHost != uriProxyHost {
+				return ConflictingArgsErrorFormat("proxyHost", uriProxyHost, opts.ProxyHost, "--proxyHost")
+			}
+			if opts.ProxyHost == "" {
+				opts.ProxyHost = uriProxyHost
+			}
+			delete(cs.UnknownOptions, "proxyhost")
+		}
+		if proxyPorts, ok := cs.UnknownOptions["proxyport"]; ok && len(proxyPorts) > 0 {
+			uriProxyPort := proxyPorts[0]
+			if opts.ProxyPort != "" && opts.ProxyPort != uriProxyPort {
+				return ConflictingArgsErrorFormat("proxyPort", uriProxyPort, opts.ProxyPort, "--proxyPort")
+			}
+			if opts.ProxyPort == "" {
+				opts.ProxyPort = uriProxyPort
+			}
+			delete(cs.UnknownOptions, "proxyport")
+		}
+		if proxyUsernames, ok := cs.UnknownOptions["proxyusername"]; ok && len(proxyUsernames) > 0 {
+			uriProxyUsername := proxyUsernames[0]
+			if opts.ProxyUsername != "" && opts.ProxyUsername != uriProxyUsername {
+				return ConflictingArgsErrorFormat("proxyUsername", uriProxyUsername, opts.ProxyUsername, "--proxyUsername")
+			}
+			if opts.ProxyUsername == "" {
+				opts.ProxyUsername = uriProxyUsername
+			}
+			delete(cs.UnknownOptions, "proxyusername")
+		}
+		if proxyPasswords, ok := cs.UnknownOptions["proxypassword"]; ok && len(proxyPasswords) > 0 {
+			uriProxyPassword := proxyPasswords[0]
+			if opts.ProxyPassword != "" && opts.ProxyPassword != uriProxyPassword {
+				return ConflictingArgsErrorFormat("proxyPassword", uriProxyPassword, opts.ProxyPassword, "--proxyPassword")
+			}
+			if opts.ProxyPassword == "" {
+				opts.ProxyPassword = uriProxyPassword
+			}
+			delete(cs.UnknownOptions, "proxypassword")
 		}
 	}
 

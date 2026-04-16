@@ -1122,6 +1122,167 @@ func TestOptionsParsingForSRV(t *testing.T) {
 }
 
 // Regression test for TOOLS-1694 to prevent issue from TOOLS-1115.
+func TestProxyOptionsFromURI(t *testing.T) {
+	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
+
+	t.Run("proxy options extracted from URI", func(t *testing.T) {
+		cs := &connstring.ConnString{
+			UnknownOptions: map[string][]string{
+				"proxyhost": {"proxy.example.com"},
+				"proxyport": {"1080"},
+			},
+		}
+		opts := &ToolOptions{
+			General:        &General{},
+			Verbosity:      &Verbosity{},
+			Connection:     &Connection{Timeout: 3},
+			URI:            &URI{},
+			SSL:            &SSL{},
+			Auth:           &Auth{},
+			Namespace:      &Namespace{},
+			Kerberos:       &Kerberos{},
+			enabledOptions: EnabledOptions{Connection: true, URI: true},
+		}
+
+		err := opts.setOptionsFromURI(cs)
+		require.NoError(t, err)
+		require.Equal(t, "proxy.example.com", opts.ProxyHost)
+		require.Equal(t, "1080", opts.ProxyPort)
+		// The proxy keys should have been removed from UnknownOptions.
+		require.NotContains(t, cs.UnknownOptions, "proxyhost")
+		require.NotContains(t, cs.UnknownOptions, "proxyport")
+	})
+
+	t.Run("proxy auth options extracted from URI", func(t *testing.T) {
+		cs := &connstring.ConnString{
+			UnknownOptions: map[string][]string{
+				"proxyhost":     {"proxy.example.com"},
+				"proxyusername": {"user"},
+				"proxypassword": {"pass"},
+			},
+		}
+		opts := &ToolOptions{
+			General:        &General{},
+			Verbosity:      &Verbosity{},
+			Connection:     &Connection{Timeout: 3},
+			URI:            &URI{},
+			SSL:            &SSL{},
+			Auth:           &Auth{},
+			Namespace:      &Namespace{},
+			Kerberos:       &Kerberos{},
+			enabledOptions: EnabledOptions{Connection: true, URI: true},
+		}
+
+		err := opts.setOptionsFromURI(cs)
+		require.NoError(t, err)
+		require.Equal(t, "proxy.example.com", opts.ProxyHost)
+		require.Equal(t, "user", opts.ProxyUsername)
+		require.Equal(t, "pass", opts.ProxyPassword)
+		require.NotContains(t, cs.UnknownOptions, "proxyusername")
+		require.NotContains(t, cs.UnknownOptions, "proxypassword")
+	})
+
+	t.Run("CLI proxy options take precedence when matching", func(t *testing.T) {
+		cs := &connstring.ConnString{
+			UnknownOptions: map[string][]string{
+				"proxyhost": {"proxy.example.com"},
+			},
+		}
+		opts := &ToolOptions{
+			General:   &General{},
+			Verbosity: &Verbosity{},
+			Connection: &Connection{
+				Timeout:   3,
+				ProxyHost: "proxy.example.com",
+			},
+			URI:            &URI{},
+			SSL:            &SSL{},
+			Auth:           &Auth{},
+			Namespace:      &Namespace{},
+			Kerberos:       &Kerberos{},
+			enabledOptions: EnabledOptions{Connection: true, URI: true},
+		}
+
+		err := opts.setOptionsFromURI(cs)
+		require.NoError(t, err)
+		require.Equal(t, "proxy.example.com", opts.ProxyHost)
+	})
+
+	t.Run("conflicting proxy host errors", func(t *testing.T) {
+		cs := &connstring.ConnString{
+			UnknownOptions: map[string][]string{
+				"proxyhost": {"proxy1.example.com"},
+			},
+		}
+		opts := &ToolOptions{
+			General:   &General{},
+			Verbosity: &Verbosity{},
+			Connection: &Connection{
+				Timeout:   3,
+				ProxyHost: "proxy2.example.com",
+			},
+			URI:            &URI{},
+			SSL:            &SSL{},
+			Auth:           &Auth{},
+			Namespace:      &Namespace{},
+			Kerberos:       &Kerberos{},
+			enabledOptions: EnabledOptions{Connection: true, URI: true},
+		}
+
+		err := opts.setOptionsFromURI(cs)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "proxyHost")
+	})
+
+	t.Run("conflicting proxy port errors", func(t *testing.T) {
+		cs := &connstring.ConnString{
+			UnknownOptions: map[string][]string{
+				"proxyport": {"1080"},
+			},
+		}
+		opts := &ToolOptions{
+			General:   &General{},
+			Verbosity: &Verbosity{},
+			Connection: &Connection{
+				Timeout:   3,
+				ProxyPort: "9050",
+			},
+			URI:            &URI{},
+			SSL:            &SSL{},
+			Auth:           &Auth{},
+			Namespace:      &Namespace{},
+			Kerberos:       &Kerberos{},
+			enabledOptions: EnabledOptions{Connection: true, URI: true},
+		}
+
+		err := opts.setOptionsFromURI(cs)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "proxyPort")
+	})
+
+	t.Run("proxy options not logged as unsupported", func(t *testing.T) {
+		var buffer bytes.Buffer
+		log.SetWriter(&buffer)
+		defer log.SetWriter(os.Stderr)
+
+		args := []string{"mongodb://mongodb.test.com:27017/?proxyHost=proxy.example.com&proxyPort=1080"}
+
+		enabled := EnabledOptions{true, true, true, true}
+		opts := New("", "", "", "", true, enabled)
+
+		_, err := opts.ParseArgs(args)
+		require.NoError(t, err)
+
+		opts.LogUnsupportedOptions()
+
+		result := buffer.String()
+		require.NotContains(t, result, "proxyhost")
+		require.NotContains(t, result, "proxyport")
+		require.Equal(t, "proxy.example.com", opts.ProxyHost)
+		require.Equal(t, "1080", opts.ProxyPort)
+	})
+}
+
 func TestHiddenOptionsDefaults(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 

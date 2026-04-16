@@ -16,6 +16,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 	"go.mongodb.org/mongo-driver/v2/tag"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/xoptions"
+	"golang.org/x/net/proxy"
 )
 
 type (
@@ -569,6 +571,36 @@ func configureClient(opts options.ToolOptions) (*mongo.Client, error) {
 
 	if cs.SSLDisableOCSPEndpointCheckSet {
 		clientopt.SetDisableOCSPEndpointCheck(cs.SSLDisableOCSPEndpointCheck)
+	}
+
+	if opts.ProxyHost != "" {
+		proxyAddr := opts.ProxyHost
+		if opts.ProxyPort != "" {
+			proxyAddr = net.JoinHostPort(opts.ProxyHost, opts.ProxyPort)
+		} else {
+			proxyAddr = net.JoinHostPort(opts.ProxyHost, "1080")
+		}
+
+		var proxyAuth *proxy.Auth
+		if opts.ProxyUsername != "" {
+			proxyAuth = &proxy.Auth{
+				User:     opts.ProxyUsername,
+				Password: opts.ProxyPassword,
+			}
+		}
+
+		dialer, err := proxy.SOCKS5("tcp", proxyAddr, proxyAuth, proxy.Direct)
+		if err != nil {
+			return nil, fmt.Errorf("error configuring SOCKS5 proxy: %v", err)
+		}
+
+		contextDialer, ok := dialer.(mopt.ContextDialer)
+		if !ok {
+			return nil, fmt.Errorf("SOCKS5 proxy dialer does not support DialContext")
+		}
+		clientopt.SetDialer(contextDialer)
+
+		log.Logvf(log.DebugLow, "using SOCKS5 proxy at %s", proxyAddr)
 	}
 
 	return mongo.Connect(clientopt)
