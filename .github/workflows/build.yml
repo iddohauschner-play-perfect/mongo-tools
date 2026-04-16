@@ -8,43 +8,11 @@ on:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            artifact: mongo-tools-linux-amd64
-            ext: ""
-            buildmode: -buildmode=pie
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            artifact: mongo-tools-linux-arm64
-            ext: ""
-            buildmode: ""
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-            artifact: mongo-tools-macos-arm64
-            ext: ""
-            buildmode: ""
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            artifact: mongo-tools-windows-amd64
-            ext: ".exe"
-            buildmode: -buildmode=exe
-            ldextra: " -s -w"
-
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.goos }}/${{ matrix.goarch }}
-
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # needed for git describe (version detection)
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -52,45 +20,71 @@ jobs:
 
       - name: Determine version and commit
         id: version
-        shell: bash
         run: |
           VERSION=$(go run release/release.go get-version)
           COMMIT=$(git rev-parse HEAD)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
 
-      - name: Build tools
-        shell: bash
+      - name: Cross-compile all targets
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
           TOOLS="bsondump mongodump mongorestore mongoimport mongoexport mongostat mongotop mongofiles"
-          LDFLAGS="-X main.VersionStr=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.version.outputs.commit }}${{ matrix.ldextra }}"
-          TAGS="failpoints"
+          VERSION="${{ steps.version.outputs.version }}"
+          COMMIT="${{ steps.version.outputs.commit }}"
 
-          mkdir -p bin
+          declare -A TARGETS
+          TARGETS=(
+            ["linux-amd64"]="linux amd64 "
+            ["linux-arm64"]="linux arm64 "
+            ["macos-arm64"]="darwin arm64 "
+            ["windows-amd64"]="windows amd64 .exe"
+          )
 
-          for tool in $TOOLS; do
-            echo "::group::Building $tool"
-            set -x
-            go build \
-              -o "bin/${tool}${{ matrix.ext }}" \
-              -ldflags "$LDFLAGS" \
-              -tags "$TAGS" \
-              ${{ matrix.buildmode }} \
-              "${tool}/main/${tool}.go"
-            set +x
+          for target in "${!TARGETS[@]}"; do
+            read -r goos goarch ext <<< "${TARGETS[$target]}"
+
+            LDFLAGS="-X main.VersionStr=${VERSION} -X main.GitCommit=${COMMIT}"
+            if [ "$goos" = "windows" ]; then
+              LDFLAGS="$LDFLAGS -s -w"
+            fi
+
+            echo "::group::Building $target"
+            mkdir -p "dist/${target}"
+            for tool in $TOOLS; do
+              GOOS=$goos GOARCH=$goarch go build \
+                -o "dist/${target}/${tool}${ext}" \
+                -ldflags "$LDFLAGS" \
+                -tags failpoints \
+                "${tool}/main/${tool}.go"
+            done
             echo "::endgroup::"
           done
 
-      - name: Verify binaries exist
-        shell: bash
-        run: ls -lh bin/
+      - name: List built binaries
+        run: find dist -type f | sort
 
-      - name: Upload artifacts
+      - name: Upload linux-amd64
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: bin/
+          name: mongo-tools-linux-amd64
+          path: dist/linux-amd64/
+
+      - name: Upload linux-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: mongo-tools-linux-arm64
+          path: dist/linux-arm64/
+
+      - name: Upload macos-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: mongo-tools-macos-arm64
+          path: dist/macos-arm64/
+
+      - name: Upload windows-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: mongo-tools-windows-amd64
+          path: dist/windows-amd64/
