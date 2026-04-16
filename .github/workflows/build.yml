@@ -72,16 +72,16 @@ jobs:
 
       - name: Create release archives
         run: |
-          mkdir -p release
+          mkdir -p _archives
           for dir in dist/*/; do
             target=$(basename "$dir")
             if [[ "$target" == *windows* ]]; then
-              (cd "$dir" && zip -r "../../release/mongo-tools-${target}.zip" .)
+              (cd "$dir" && zip -r "../../_archives/mongo-tools-${target}.zip" .)
             else
-              tar -czf "release/mongo-tools-${target}.tar.gz" -C "$dir" .
+              tar -czf "_archives/mongo-tools-${target}.tar.gz" -C "$dir" .
             fi
           done
-          ls -lh release/
+          ls -lh _archives/
 
       - name: Upload linux-amd64
         uses: actions/upload-artifact@v4
@@ -115,4 +115,4 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes \
-            release/*
+            _archives/*
