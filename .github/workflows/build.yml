@@ -1,0 +1,96 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            artifact: mongo-tools-linux-amd64
+            ext: ""
+            buildmode: -buildmode=pie
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            artifact: mongo-tools-linux-arm64
+            ext: ""
+            buildmode: ""
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            artifact: mongo-tools-macos-arm64
+            ext: ""
+            buildmode: ""
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            artifact: mongo-tools-windows-amd64
+            ext: ".exe"
+            buildmode: -buildmode=exe
+            ldextra: " -s -w"
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for git describe (version detection)
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Determine version and commit
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(go run release/release.go get-version)
+          COMMIT=$(git rev-parse HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Build tools
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          TOOLS="bsondump mongodump mongorestore mongoimport mongoexport mongostat mongotop mongofiles"
+          LDFLAGS="-X main.VersionStr=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.version.outputs.commit }}${{ matrix.ldextra }}"
+          TAGS="failpoints"
+
+          mkdir -p bin
+
+          for tool in $TOOLS; do
+            echo "::group::Building $tool"
+            set -x
+            go build \
+              -o "bin/${tool}${{ matrix.ext }}" \
+              -ldflags "$LDFLAGS" \
+              -tags "$TAGS" \
+              ${{ matrix.buildmode }} \
+              "${tool}/main/${tool}.go"
+            set +x
+            echo "::endgroup::"
+          done
+
+      - name: Verify binaries exist
+        shell: bash
+        run: ls -lh bin/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: bin/
