@@ -21,8 +21,10 @@ jobs:
       - name: Determine version and commit
         id: version
         run: |
-          VERSION=$(go run release/release.go get-version)
           COMMIT=$(git rev-parse HEAD)
+          # get-version relies on git describe which needs tags.
+          # Fall back to the short commit hash when no tags exist.
+          VERSION=$(go run release/release.go get-version 2>/dev/null || echo "dev-${COMMIT:0:8}")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
 
